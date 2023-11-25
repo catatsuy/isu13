@@ -116,6 +116,7 @@ func initializeHandler(c echo.Context) error {
 	}
 
 	genThemesCache()
+	genUsersCache()
 
 	c.Request().Header.Add("Content-Type", "application/json;charset=utf-8")
 	return c.JSON(http.StatusOK, InitializeResponse{
@@ -153,6 +154,8 @@ func (c *cache[K, V]) Get(key K) (V, bool) {
 var hashCache = NewCache[string, string]()
 
 var themeCache = NewCache[int64, ThemeModel]()
+
+var userCache = NewCache[int64, UserModel]()
 
 func main() {
 	e := echo.New()
@@ -237,6 +240,7 @@ func main() {
 	powerDNSSubdomainAddress = subdomainAddr
 
 	genThemesCache()
+	genUsersCache()
 
 	// HTTPサーバ起動
 	listenAddr := net.JoinHostPort("", strconv.Itoa(listenPort))
@@ -285,5 +289,28 @@ func genThemesCache() {
 
 	for _, theme := range themes {
 		themeCache.Set(theme.UserID, theme)
+	}
+}
+
+// users全体をCacheする
+func genUsersCache() {
+	userCache = NewCache[int64, UserModel]()
+	ctx := context.Background()
+	tx, err := dbConn.BeginTxx(ctx, nil)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	var users []UserModel
+	if err := tx.SelectContext(ctx, &users, "SELECT * FROM users"); err != nil {
+		log.Fatal(err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		log.Fatal(err)
+	}
+
+	for _, user := range users {
+		userCache.Set(user.ID, user)
 	}
 }
