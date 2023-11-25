@@ -166,6 +166,8 @@ func postIconHandler(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to commit: "+err.Error())
 	}
 
+	hashCache.Set(sess.Values[defaultUsernameKey].(string), fmt.Sprintf("%x", sha256.Sum256(req.Image)))
+
 	return c.JSON(http.StatusCreated, &PostIconResponse{
 		ID: iconID,
 	})
@@ -410,6 +412,21 @@ func fillUserResponse(ctx context.Context, tx *sqlx.Tx, userModel UserModel) (Us
 	themeModel := ThemeModel{}
 	if err := tx.GetContext(ctx, &themeModel, "SELECT * FROM themes WHERE user_id = ?", userModel.ID); err != nil {
 		return User{}, err
+	}
+
+	hv, ok := hashCache.Get(userModel.Name)
+	if ok {
+		return User{
+			ID:          userModel.ID,
+			Name:        userModel.Name,
+			DisplayName: userModel.DisplayName,
+			Description: userModel.Description,
+			Theme: Theme{
+				ID:       themeModel.ID,
+				DarkMode: themeModel.DarkMode,
+			},
+			IconHash: hv,
+		}, nil
 	}
 
 	var image []byte
