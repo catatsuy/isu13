@@ -4,6 +4,7 @@ package main
 // sqlx的な参考: https://jmoiron.github.io/sqlx/
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net"
@@ -114,6 +115,8 @@ func initializeHandler(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to initialize: "+err.Error())
 	}
 
+	genThemesCache()
+
 	c.Request().Header.Add("Content-Type", "application/json;charset=utf-8")
 	return c.JSON(http.StatusOK, InitializeResponse{
 		Language: "golang",
@@ -148,6 +151,8 @@ func (c *cache[K, V]) Get(key K) (V, bool) {
 }
 
 var hashCache = NewCache[string, string]()
+
+var themeCache = NewCache[int64, ThemeModel]()
 
 func main() {
 	e := echo.New()
@@ -231,6 +236,8 @@ func main() {
 	}
 	powerDNSSubdomainAddress = subdomainAddr
 
+	genThemesCache()
+
 	// HTTPサーバ起動
 	listenAddr := net.JoinHostPort("", strconv.Itoa(listenPort))
 	if err := e.Start(listenAddr); err != nil {
@@ -254,5 +261,29 @@ func errorResponseHandler(err error, c echo.Context) {
 
 	if e := c.JSON(http.StatusInternalServerError, &ErrorResponse{Error: err.Error()}); e != nil {
 		c.Logger().Errorf("%+v", e)
+	}
+}
+
+// themes全件Cacheする
+func genThemesCache() {
+	themeCache = NewCache[int64, ThemeModel]()
+
+	ctx := context.Background()
+	tx, err := dbConn.BeginTxx(ctx, nil)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	var themes []ThemeModel
+	if err := tx.SelectContext(ctx, &themes, "SELECT * FROM themes"); err != nil {
+		log.Fatal(err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		log.Fatal(err)
+	}
+
+	for _, theme := range themes {
+		themeCache.Set(theme.UserID, theme)
 	}
 }
