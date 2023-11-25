@@ -90,6 +90,14 @@ func getIconHandler(c echo.Context) error {
 
 	username := c.Param("username")
 
+	hashV := c.Request().Header.Get("If-None-Match")
+	if hashV != "" {
+		hv, _ := hashCache.Get(username)
+		if hv != "" && `"`+hv+`"` == hashV {
+			return c.NoContent(http.StatusNotModified)
+		}
+	}
+
 	tx, err := dbConn.BeginTxx(ctx, nil)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to begin transaction: "+err.Error())
@@ -414,7 +422,9 @@ func fillUserResponse(ctx context.Context, tx *sqlx.Tx, userModel UserModel) (Us
 			return User{}, err
 		}
 	}
-	iconHash := sha256.Sum256(image)
+	iconHash := fmt.Sprintf("%x", sha256.Sum256(image))
+
+	hashCache.Set(userModel.Name, iconHash)
 
 	user := User{
 		ID:          userModel.ID,
@@ -425,7 +435,7 @@ func fillUserResponse(ctx context.Context, tx *sqlx.Tx, userModel UserModel) (Us
 			ID:       themeModel.ID,
 			DarkMode: themeModel.DarkMode,
 		},
-		IconHash: fmt.Sprintf("%x", iconHash),
+		IconHash: iconHash,
 	}
 
 	return user, nil

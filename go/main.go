@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"strconv"
+	"sync"
 
 	"github.com/go-sql-driver/mysql"
 	"github.com/jmoiron/sqlx"
@@ -118,6 +119,35 @@ func initializeHandler(c echo.Context) error {
 		Language: "golang",
 	})
 }
+
+type cache[K comparable, V any] struct {
+	// Setが多いならsync.Mutex
+	sync.RWMutex
+	items map[K]V
+}
+
+func NewCache[K comparable, V any]() *cache[K, V] {
+	m := make(map[K]V)
+	c := &cache[K, V]{
+		items: m,
+	}
+	return c
+}
+
+func (c *cache[K, V]) Set(key K, value V) {
+	c.Lock()
+	c.items[key] = value
+	c.Unlock()
+}
+
+func (c *cache[K, V]) Get(key K) (V, bool) {
+	c.RLock()
+	v, found := c.items[key]
+	c.RUnlock()
+	return v, found
+}
+
+var hashCache = NewCache[string, string]()
 
 func main() {
 	e := echo.New()
