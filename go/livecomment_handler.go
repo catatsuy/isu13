@@ -103,14 +103,9 @@ func getLivecommentsHandler(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to get livecomments: "+err.Error())
 	}
 
-	livecomments := make([]Livecomment, len(livecommentModels))
-	for i := range livecommentModels {
-		livecomment, err := fillLivecommentResponse(ctx, tx, livecommentModels[i])
-		if err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, "failed to fil livecomments: "+err.Error())
-		}
-
-		livecomments[i] = livecomment
+	livecomments, err := fillLivecommentResponses(ctx, tx, livecommentModels)
+	if err != nil {
+		return err
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -439,6 +434,68 @@ func fillLivecommentResponse(ctx context.Context, tx *sqlx.Tx, livecommentModel 
 	}
 
 	return livecomment, nil
+}
+
+func fillLivecommentResponses(ctx context.Context, tx *sqlx.Tx, livecommentModels []LivecommentModel) ([]Livecomment, error) {
+	if len(livecommentModels) == 0 {
+		return []Livecomment{}, nil
+	}
+
+	livestreamIDs := make([]int64, 0, len(livecommentModels))
+
+	// ライブストリームIDの集合を作成
+	for _, model := range livecommentModels {
+		livestreamIDs = append(livestreamIDs, model.LivestreamID)
+	}
+
+	// ライブストリームデータの取得
+	livestreams := make(map[int64]LivestreamModel)
+	query, args, err := sqlx.In("SELECT * FROM livestreams WHERE id IN (?)", livestreamIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	livestreamModels := []LivestreamModel{}
+	if err := tx.SelectContext(ctx, &livestreamModels, query, args...); err != nil {
+		return nil, err
+	}
+	for _, l := range livestreamModels {
+		livestreams[l.ID] = l
+	}
+
+	// Livecommentの組み立て
+	var livecomments []Livecomment
+	for _, livecommentModel := range livecommentModels {
+		commentOwnerModel, ok := userCache.Get(livecommentModel.UserID)
+		if !ok {
+			return nil, errors.New("failed to get user from cache")
+		}
+		commentOwner, err := fillUserResponse(ctx, tx, commentOwnerModel)
+		if err != nil {
+			return nil, err
+		}
+
+		livestreamModel, ok := livestreams[livecommentModel.LivestreamID]
+		if !ok {
+			return nil, errors.New("failed to get livestream")
+		}
+
+		livestream, err := fillLivestreamResponse(ctx, tx, livestreamModel)
+		if err != nil {
+			return nil, err
+		}
+
+		livecomments = append(livecomments, Livecomment{
+			ID:         livecommentModel.ID,
+			User:       commentOwner,
+			Livestream: livestream,
+			Comment:    livecommentModel.Comment,
+			Tip:        livecommentModel.Tip,
+			CreatedAt:  livecommentModel.CreatedAt,
+		})
+	}
+
+	return livecomments, nil
 }
 
 func fillLivecommentReportResponse(ctx context.Context, tx *sqlx.Tx, reportModel LivecommentReportModel) (LivecommentReport, error) {
