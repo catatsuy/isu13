@@ -93,33 +93,84 @@ func getUserStatisticsHandler(c echo.Context) error {
 	}
 
 	var ranking UserRanking
+
+	type UserStatsModel struct {
+		UserID    int64 `db:"id"`
+		Reactions int64 `db:"reactions"`
+	}
+
+	type UserStatsTipModel struct {
+		UserID int64 `db:"id"`
+		Tips   int64 `db:"tips"`
+	}
+
+	type UserStats struct {
+		UserID    int64
+		Reactions int64
+		Tips      int64
+	}
+
+	// Map to hold user stats
+	userStats := make(map[int64]UserStats)
+
+	// userStatsはScoreが0のチームも計算する必要があるので、まず0で埋める
 	for _, user := range users {
-		var reactions int64
-		query := `
-		SELECT COUNT(*) FROM users u
-		INNER JOIN livestreams l ON l.user_id = u.id
-		INNER JOIN reactions r ON r.livestream_id = l.id
-		WHERE u.id = ?`
-		if err := tx.GetContext(ctx, &reactions, query, user.ID); err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return echo.NewHTTPError(http.StatusInternalServerError, "failed to count reactions: "+err.Error())
+		userStats[user.ID] = UserStats{
+			UserID:    user.ID,
+			Reactions: 0,
+			Tips:      0,
 		}
+	}
 
-		var tips int64
-		query = `
-		SELECT IFNULL(SUM(l2.tip), 0) FROM users u
-		INNER JOIN livestreams l ON l.user_id = u.id	
-		INNER JOIN livecomments l2 ON l2.livestream_id = l.id
-		WHERE u.id = ?`
-		if err := tx.GetContext(ctx, &tips, query, user.ID); err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return echo.NewHTTPError(http.StatusInternalServerError, "failed to count tips: "+err.Error())
+	// Query to get reactions for all users
+	reactionQuery := `
+	SELECT u.id AS id, COUNT(*) as reactions
+	FROM users u
+	JOIN livestreams l ON l.user_id = u.id
+	JOIN reactions r ON r.livestream_id = l.id
+	GROUP BY u.id`
+	var reactionResults []UserStatsModel
+	if err := tx.SelectContext(ctx, &reactionResults, reactionQuery); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to get reactions: "+err.Error())
+	}
+	for _, result := range reactionResults {
+		userStats[result.UserID] = UserStats{
+			UserID:    result.UserID,
+			Reactions: result.Reactions,
 		}
+	}
 
-		score := reactions + tips
+	// Query to get tips for all users
+	tipsQuery := `
+	SELECT u.id AS id, IFNULL(SUM(l2.tip), 0) as tips
+	FROM users u
+	JOIN livestreams l ON l.user_id = u.id
+	JOIN livecomments l2 ON l2.livestream_id = l.id
+	GROUP BY u.id`
+	var tipsResults []UserStatsTipModel
+	if err := tx.SelectContext(ctx, &tipsResults, tipsQuery); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to get tips: "+err.Error())
+	}
+	for _, result := range tipsResults {
+		if stat, exists := userStats[result.UserID]; exists {
+			stat.Tips = result.Tips
+			userStats[result.UserID] = stat
+		}
+	}
+
+	// Calculate scores and populate ranking
+	for _, user := range users {
+		stats, exists := userStats[user.ID]
+		if !exists {
+			continue
+		}
+		score := stats.Reactions + stats.Tips
 		ranking = append(ranking, UserRankingEntry{
 			Username: user.Name,
 			Score:    score,
 		})
 	}
+
 	sort.Sort(ranking)
 
 	var rank int64 = 1
