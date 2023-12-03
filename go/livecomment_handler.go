@@ -79,12 +79,6 @@ func getLivecommentsHandler(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "livestream_id in path must be integer")
 	}
 
-	tx, err := dbConn.BeginTxx(ctx, nil)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to begin transaction: "+err.Error())
-	}
-	defer tx.Rollback()
-
 	query := "SELECT * FROM livecomments WHERE livestream_id = ? ORDER BY created_at DESC"
 	if c.QueryParam("limit") != "" {
 		limit, err := strconv.Atoi(c.QueryParam("limit"))
@@ -95,7 +89,7 @@ func getLivecommentsHandler(c echo.Context) error {
 	}
 
 	livecommentModels := []LivecommentModel{}
-	err = tx.SelectContext(ctx, &livecommentModels, query, livestreamID)
+	err = dbConn.SelectContext(ctx, &livecommentModels, query, livestreamID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return c.JSON(http.StatusOK, []*Livecomment{})
 	}
@@ -103,13 +97,9 @@ func getLivecommentsHandler(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to get livecomments: "+err.Error())
 	}
 
-	livecomments, err := fillLivecommentResponses(ctx, tx, livecommentModels)
+	livecomments, err := fillLivecommentResponses(ctx, livecommentModels)
 	if err != nil {
 		return err
-	}
-
-	if err := tx.Commit(); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to commit: "+err.Error())
 	}
 
 	return c.JSON(http.StatusOK, livecomments)
@@ -436,7 +426,7 @@ func fillLivecommentResponse(ctx context.Context, tx *sqlx.Tx, livecommentModel 
 	return livecomment, nil
 }
 
-func fillLivecommentResponses(ctx context.Context, tx *sqlx.Tx, livecommentModels []LivecommentModel) ([]Livecomment, error) {
+func fillLivecommentResponses(ctx context.Context, livecommentModels []LivecommentModel) ([]Livecomment, error) {
 	if len(livecommentModels) == 0 {
 		return []Livecomment{}, nil
 	}
@@ -456,7 +446,7 @@ func fillLivecommentResponses(ctx context.Context, tx *sqlx.Tx, livecommentModel
 	}
 
 	livestreamModels := []LivestreamModel{}
-	if err := tx.SelectContext(ctx, &livestreamModels, query, args...); err != nil {
+	if err := dbConn.SelectContext(ctx, &livestreamModels, query, args...); err != nil {
 		return nil, err
 	}
 	for _, l := range livestreamModels {
@@ -470,7 +460,7 @@ func fillLivecommentResponses(ctx context.Context, tx *sqlx.Tx, livecommentModel
 		if !ok {
 			return nil, errors.New("failed to get user from cache")
 		}
-		commentOwner, err := fillUserResponse(ctx, tx, commentOwnerModel)
+		commentOwner, err := fillUserResponseNoTx(ctx, commentOwnerModel)
 		if err != nil {
 			return nil, err
 		}
@@ -480,7 +470,7 @@ func fillLivecommentResponses(ctx context.Context, tx *sqlx.Tx, livecommentModel
 			return nil, errors.New("failed to get livestream")
 		}
 
-		livestream, err := fillLivestreamResponse(ctx, tx, livestreamModel)
+		livestream, err := fillLivestreamResponseNoTx(ctx, livestreamModel)
 		if err != nil {
 			return nil, err
 		}

@@ -484,6 +484,82 @@ func getLivecommentReportsHandler(c echo.Context) error {
 	return c.JSON(http.StatusOK, reports)
 }
 
+func fillLivestreamResponseNoTx(ctx context.Context, livestreamModel LivestreamModel) (Livestream, error) {
+	ownerModel, ok := userCache.Get(livestreamModel.UserID)
+	if !ok {
+		return Livestream{}, errors.New("failed to get owner from cache")
+	}
+	owner, err := fillUserResponseNoTx(ctx, ownerModel)
+	if err != nil {
+		return Livestream{}, err
+	}
+
+	var livestreamTagModels []*LivestreamTagModel
+	if err := dbConn.SelectContext(ctx, &livestreamTagModels, "SELECT * FROM livestream_tags WHERE livestream_id = ?", livestreamModel.ID); err != nil {
+		return Livestream{}, err
+	}
+
+	if len(livestreamTagModels) == 0 {
+		return Livestream{
+			ID:           livestreamModel.ID,
+			Owner:        owner,
+			Title:        livestreamModel.Title,
+			Tags:         []Tag{},
+			Description:  livestreamModel.Description,
+			PlaylistUrl:  livestreamModel.PlaylistUrl,
+			ThumbnailUrl: livestreamModel.ThumbnailUrl,
+			StartAt:      livestreamModel.StartAt,
+			EndAt:        livestreamModel.EndAt,
+		}, nil
+	}
+
+	// Step 1: Collect all tag IDs
+	tagIDs := make([]int64, 0, len(livestreamTagModels))
+	for _, tagModel := range livestreamTagModels {
+		tagIDs = append(tagIDs, tagModel.TagID)
+	}
+
+	// Step 2: Retrieve all tags in a single query
+	tagModels := make([]TagModel, 0)
+	query, args, err := sqlx.In("SELECT * FROM tags WHERE id IN (?)", tagIDs)
+	if err != nil {
+		return Livestream{}, err
+	}
+
+	if err := dbConn.SelectContext(ctx, &tagModels, query, args...); err != nil {
+		return Livestream{}, err
+	}
+
+	// Step 3: Map the results
+	tagMap := make(map[int64]TagModel)
+	for _, tm := range tagModels {
+		tagMap[tm.ID] = tm
+	}
+
+	tags := make([]Tag, len(livestreamTagModels))
+	for i, tModel := range livestreamTagModels {
+		if tag, ok := tagMap[tModel.TagID]; ok {
+			tags[i] = Tag{
+				ID:   tag.ID,
+				Name: tag.Name,
+			}
+		}
+	}
+
+	livestream := Livestream{
+		ID:           livestreamModel.ID,
+		Owner:        owner,
+		Title:        livestreamModel.Title,
+		Tags:         tags,
+		Description:  livestreamModel.Description,
+		PlaylistUrl:  livestreamModel.PlaylistUrl,
+		ThumbnailUrl: livestreamModel.ThumbnailUrl,
+		StartAt:      livestreamModel.StartAt,
+		EndAt:        livestreamModel.EndAt,
+	}
+	return livestream, nil
+}
+
 func fillLivestreamResponse(ctx context.Context, tx *sqlx.Tx, livestreamModel LivestreamModel) (Livestream, error) {
 	ownerModel, ok := userCache.Get(livestreamModel.UserID)
 	if !ok {
