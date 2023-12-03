@@ -439,7 +439,7 @@ func fillLivecommentResponses(ctx context.Context, livecommentModels []Livecomme
 	}
 
 	// ライブストリームデータの取得
-	livestreams := make(map[int64]LivestreamModel)
+	livestreams := make(map[int64]Livestream)
 	query, args, err := sqlx.In("SELECT * FROM livestreams WHERE id IN (?)", livestreamIDs)
 	if err != nil {
 		return nil, err
@@ -449,8 +449,14 @@ func fillLivecommentResponses(ctx context.Context, livecommentModels []Livecomme
 	if err := dbConn.SelectContext(ctx, &livestreamModels, query, args...); err != nil {
 		return nil, err
 	}
-	for _, l := range livestreamModels {
-		livestreams[l.ID] = l
+
+	livestreamsF, err := fillLivestreamsResponseNoTx(ctx, livestreamModels)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, livestream := range livestreamsF {
+		livestreams[livestream.ID] = livestream
 	}
 
 	// Livecommentの組み立て
@@ -465,20 +471,10 @@ func fillLivecommentResponses(ctx context.Context, livecommentModels []Livecomme
 			return nil, err
 		}
 
-		livestreamModel, ok := livestreams[livecommentModel.LivestreamID]
-		if !ok {
-			return nil, errors.New("failed to get livestream")
-		}
-
-		livestream, err := fillLivestreamResponseNoTx(ctx, livestreamModel)
-		if err != nil {
-			return nil, err
-		}
-
 		livecomments = append(livecomments, Livecomment{
 			ID:         livecommentModel.ID,
 			User:       commentOwner,
-			Livestream: livestream,
+			Livestream: livestreams[livecommentModel.LivestreamID],
 			Comment:    livecommentModel.Comment,
 			Tip:        livecommentModel.Tip,
 			CreatedAt:  livecommentModel.CreatedAt,
