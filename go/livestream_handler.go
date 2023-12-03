@@ -174,8 +174,9 @@ func searchLivestreamsHandler(c echo.Context) error {
 	ctx := c.Request().Context()
 	keyTagName := c.QueryParam("tag")
 
-	var livestreamModels []*LivestreamModel
+	var livestreamModels []LivestreamModel
 	if c.QueryParam("tag") != "" {
+		livestreamModels = make([]LivestreamModel, 0, 100)
 		// タグによる取得
 		var tagIDList []int
 		if err := dbConn.SelectContext(ctx, &tagIDList, "SELECT id FROM tags WHERE name = ?", keyTagName); err != nil {
@@ -197,7 +198,7 @@ func searchLivestreamsHandler(c echo.Context) error {
 				return echo.NewHTTPError(http.StatusInternalServerError, "failed to get livestreams: "+err.Error())
 			}
 
-			livestreamModels = append(livestreamModels, &ls)
+			livestreamModels = append(livestreamModels, ls)
 		}
 	} else {
 		// 検索条件なし
@@ -215,13 +216,9 @@ func searchLivestreamsHandler(c echo.Context) error {
 		}
 	}
 
-	livestreams := make([]Livestream, len(livestreamModels))
-	for i := range livestreamModels {
-		livestream, err := fillLivestreamResponseNoTx(ctx, *livestreamModels[i])
-		if err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, "failed to fill livestream: "+err.Error())
-		}
-		livestreams[i] = livestream
+	livestreams, err := fillLivestreamsResponseNoTx(ctx, livestreamModels)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to fill livestream: "+err.Error())
 	}
 
 	return c.JSON(http.StatusOK, livestreams)
@@ -699,6 +696,9 @@ func fillLivestreamsResponseNoTx(ctx context.Context, livestreamModels []Livestr
 		}
 
 		tags, _ := tagsByLivestream[model.ID]
+		if len(tags) == 0 {
+			tags = []Tag{}
+		}
 
 		livestreams[i] = Livestream{
 			ID:           model.ID,
