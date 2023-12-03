@@ -273,17 +273,8 @@ func genThemesCache() {
 	themeCache = NewCache[int64, ThemeModel]()
 
 	ctx := context.Background()
-	tx, err := dbConn.BeginTxx(ctx, nil)
-	if err != nil {
-		log.Fatal(err)
-	}
-
 	var themes []ThemeModel
-	if err := tx.SelectContext(ctx, &themes, "SELECT * FROM themes"); err != nil {
-		log.Fatal(err)
-	}
-
-	if err := tx.Commit(); err != nil {
+	if err := dbConn.SelectContext(ctx, &themes, "SELECT * FROM themes"); err != nil {
 		log.Fatal(err)
 	}
 
@@ -296,17 +287,9 @@ func genThemesCache() {
 func genUsersCache() {
 	userCache = NewCache[int64, UserModel]()
 	ctx := context.Background()
-	tx, err := dbConn.BeginTxx(ctx, nil)
-	if err != nil {
-		log.Fatal(err)
-	}
 
 	var users []UserModel
-	if err := tx.SelectContext(ctx, &users, "SELECT * FROM users"); err != nil {
-		log.Fatal(err)
-	}
-
-	if err := tx.Commit(); err != nil {
+	if err := dbConn.SelectContext(ctx, &users, "SELECT * FROM users"); err != nil {
 		log.Fatal(err)
 	}
 
